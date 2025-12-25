@@ -1,0 +1,19 @@
+# --- MT5 runtime ---
+MT5/Files/*
+!MT5/Files/README.md
+
+# logs
+*.log
+
+# json runtime / spool
+*.json
+*.jsonl
+
+# python venv
+venv/
+.env/
+
+# OS
+.DS_Store
+Thumbs.db
+
