@@ -155,7 +155,7 @@ bool RebalanceDue(const PortfolioState &state, const PortfolioConfig &cfg)
    return false;
 }
 
-bool ExecuteBootstrap(CTrade &trade, PortfolioState &state, const PortfolioConfig &cfg)
+bool ExecuteBootstrap(CTrade &trade_ref, PortfolioState &state, const PortfolioConfig &cfg)
 {
    LogMessage("Bootstrap start");
    double equity = AccountInfoDouble(ACCOUNT_EQUITY);
@@ -194,12 +194,12 @@ bool ExecuteBootstrap(CTrade &trade, PortfolioState &state, const PortfolioConfi
       if(volume <= 0.0)
          continue;
       string comment = cfg.portfolio_id + "|" + symbol;
-      trade.SetExpertMagicNumber(cfg.magic);
+      trade_ref.SetExpertMagicNumber(cfg.magic);
       bool result = false;
       if(delta_value > 0)
-         result = trade.Buy(volume, symbol, price, 0.0, 0.0, comment);
+         result = trade_ref.Buy(volume, symbol, price, 0.0, 0.0, comment);
       else
-         result = trade.Sell(volume, symbol, SymbolInfoDouble(symbol, SYMBOL_BID), 0.0, 0.0, comment);
+         result = trade_ref.Sell(volume, symbol, SymbolInfoDouble(symbol, SYMBOL_BID), 0.0, 0.0, comment);
       if(result)
       {
          orders_done++;
@@ -212,7 +212,7 @@ bool ExecuteBootstrap(CTrade &trade, PortfolioState &state, const PortfolioConfi
    return true;
 }
 
-bool ExecuteRebalance(CTrade &trade, PortfolioState &state, const PortfolioConfig &cfg)
+bool ExecuteRebalance(CTrade &trade_ref, PortfolioState &state, const PortfolioConfig &cfg)
 {
    double equity = AccountInfoDouble(ACCOUNT_EQUITY);
    if(equity <= 0.0)
@@ -280,12 +280,12 @@ bool ExecuteRebalance(CTrade &trade, PortfolioState &state, const PortfolioConfi
       if(volume <= 0.0)
          continue;
       string comment = cfg.portfolio_id + "|" + symbol;
-      trade.SetExpertMagicNumber(cfg.magic);
+      trade_ref.SetExpertMagicNumber(cfg.magic);
       bool result = false;
       if(delta_value > 0)
-         result = trade.Buy(volume, symbol, price, 0.0, 0.0, comment);
+         result = trade_ref.Buy(volume, symbol, price, 0.0, 0.0, comment);
       else
-         result = trade.Sell(volume, symbol, SymbolInfoDouble(symbol, SYMBOL_BID), 0.0, 0.0, comment);
+         result = trade_ref.Sell(volume, symbol, SymbolInfoDouble(symbol, SYMBOL_BID), 0.0, 0.0, comment);
       if(result)
       {
          any_trade = true;
