@@ -71,13 +71,20 @@ double NormalizeVolume(string symbol, double volume_raw)
 {
    double min_vol = SymbolInfoDouble(symbol, SYMBOL_VOLUME_MIN);
    double max_vol = SymbolInfoDouble(symbol, SYMBOL_VOLUME_MAX);
+   if(volume_raw <= 0.0)
+      return 0.0;
+   if(min_vol > 0.0 && volume_raw < min_vol)
+      return 0.0;
    double step = SymbolInfoDouble(symbol, SYMBOL_VOLUME_STEP);
    if(step <= 0.0)
       step = min_vol;
+   if(step <= 0.0)
+      return 0.0;
    double volume = MathFloor(volume_raw / step) * step;
    volume = MathMax(min_vol, volume);
    volume = MathMin(max_vol, volume);
-   return NormalizeDouble(volume, 2);
+   int digits = (int)SymbolInfoInteger(symbol, SYMBOL_DIGITS);
+   return NormalizeDouble(volume, digits);
 }
 
 double SymbolValuePerLot(string symbol, double price)
