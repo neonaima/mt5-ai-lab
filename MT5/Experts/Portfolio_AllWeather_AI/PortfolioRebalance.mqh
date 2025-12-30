@@ -246,6 +246,7 @@ bool ExecuteRebalance(CTrade &trade, PortfolioState &state, const PortfolioConfi
    }
    WriteRebalanceProposal(state, "triggered");
    int orders_done = 0;
+   bool any_trade = false;
    for(int i=0; i<total; i++)
    {
       string symbol = state.targets[i].symbol;
@@ -287,13 +288,21 @@ bool ExecuteRebalance(CTrade &trade, PortfolioState &state, const PortfolioConfi
          result = trade.Sell(volume, symbol, SymbolInfoDouble(symbol, SYMBOL_BID), 0.0, 0.0, comment);
       if(result)
       {
+         any_trade = true;
          orders_done++;
          if(orders_done >= cfg.max_orders_per_cycle)
             break;
       }
    }
-   state.last_rebalance_ts = TimeCurrent();
-   LogMessage("Rebalance executed");
+   if(any_trade)
+   {
+      state.last_rebalance_ts = TimeCurrent();
+      LogMessage("Rebalance executed");
+   }
+   else
+   {
+      LogMessage("Rebalance no-op (no trades placed)");
+   }
    return true;
 }
 
