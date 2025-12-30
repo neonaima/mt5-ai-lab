@@ -39,9 +39,9 @@ string GenerateRunId()
 {
    datetime now = TimeCurrent();
    string stamp = TimeToString(now, TIME_DATE|TIME_SECONDS);
-   stamp = StringReplace(stamp, ".", "");
-   stamp = StringReplace(stamp, ":", "");
-   stamp = StringReplace(stamp, " ", "_");
+   StringReplace(stamp, ".", "");
+   StringReplace(stamp, ":", "");
+   StringReplace(stamp, " ", "_");
    return stamp;
 }
 
@@ -83,8 +83,7 @@ double NormalizeVolume(string symbol, double volume_raw)
    double volume = MathFloor(volume_raw / step) * step;
    volume = MathMax(min_vol, volume);
    volume = MathMin(max_vol, volume);
-   long digits_value = SymbolInfoInteger(symbol, SYMBOL_DIGITS);
-   int digits = (int)digits_value;
+   int digits = (int)SymbolInfoInteger(symbol, SYMBOL_DIGITS);
    return NormalizeDouble(volume, digits);
 }
 
