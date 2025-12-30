@@ -83,7 +83,8 @@ double NormalizeVolume(string symbol, double volume_raw)
    double volume = MathFloor(volume_raw / step) * step;
    volume = MathMax(min_vol, volume);
    volume = MathMin(max_vol, volume);
-   int digits = (int)SymbolInfoInteger(symbol, SYMBOL_DIGITS);
+   long digits_value = SymbolInfoInteger(symbol, SYMBOL_DIGITS);
+   int digits = (int)digits_value;
    return NormalizeDouble(volume, digits);
 }
 
