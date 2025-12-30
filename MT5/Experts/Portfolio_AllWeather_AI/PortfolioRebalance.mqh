@@ -120,7 +120,7 @@ bool SymbolGuardrailsOk(const PortfolioConfig &cfg, string symbol, double turnov
       reason = "Equity <= 0";
       return false;
    }
-   double free_margin = AccountInfoDouble(ACCOUNT_FREEMARGIN);
+   double free_margin = AccountInfoDouble(ACCOUNT_MARGIN_FREE);
    double free_margin_pct = (free_margin / equity) * 100.0;
    double spread_points = SymbolSpreadPoints(symbol);
    return GuardrailsOk(cfg, free_margin_pct, spread_points, turnover_pct, orders_count, reason);
