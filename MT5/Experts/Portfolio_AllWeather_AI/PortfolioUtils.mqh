@@ -59,9 +59,10 @@ bool EnsureSymbolReady(string symbol)
       LogMessage("SymbolSelect failed for " + symbol);
       return false;
    }
-   if(!SymbolInfoInteger(symbol, SYMBOL_TRADE_ALLOWED))
+   int digits = (int)SymbolInfoInteger(symbol, SYMBOL_DIGITS);
+   if(digits <= 0)
    {
-      LogMessage("Trading disabled for symbol " + symbol);
+      LogMessage("Symbol digits unavailable for " + symbol);
       return false;
    }
    return true;
