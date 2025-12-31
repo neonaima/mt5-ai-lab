@@ -22,6 +22,8 @@ input double InpUSODriftThreshold = 0.02;
 input double InpUSONoAddBelowDD = 0.05;
 input double InpMaxDD = 0.12;
 
+input double InpCapitalBufferPct = 0.30; // 30% non investito
+
 input double InpMinFreeMarginPct = 70.0;
 input double InpMaxSpreadPoints = 25.0;
 input double InpMaxTurnoverPct = 0.15;
@@ -60,6 +62,7 @@ void UpdateConfig()
    g_cfg.uso_drift_threshold = InpUSODriftThreshold;
    g_cfg.uso_no_add_below_dd = InpUSONoAddBelowDD;
    g_cfg.max_dd = InpMaxDD;
+   g_cfg.capital_buffer_pct = InpCapitalBufferPct;
 }
 
 void UpdateDrawdown(PortfolioState &state)
@@ -158,4 +161,3 @@ void OnTimer()
 {
    EvaluateCycle("timer");
 }
-
