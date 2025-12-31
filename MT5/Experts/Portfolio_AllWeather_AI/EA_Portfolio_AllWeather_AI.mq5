@@ -26,7 +26,8 @@ input double InpCapitalBufferPct = 0.30; // 30% non investito
 
 input double InpMinFreeMarginPct = 70.0;
 input double InpMaxSpreadPoints = 25.0;
-input double InpMaxTurnoverPct = 0.15;
+input double InpMaxTurnoverPct_Rebalance = 0.15;
+input double InpMaxTurnoverPct_Bootstrap = 0.80;
 input int InpMaxOrdersPerCycle = 6;
 
 CTrade trade;
@@ -55,7 +56,8 @@ void UpdateConfig()
    g_cfg.max_orders_per_cycle = InpMaxOrdersPerCycle;
    g_cfg.min_free_margin_pct = InpMinFreeMarginPct;
    g_cfg.max_spread_points = InpMaxSpreadPoints;
-   g_cfg.max_turnover_pct = InpMaxTurnoverPct;
+   g_cfg.max_turnover_pct_rebalance = InpMaxTurnoverPct_Rebalance;
+   g_cfg.max_turnover_pct_bootstrap = InpMaxTurnoverPct_Bootstrap;
    g_cfg.rebalance_days = InpRebalanceDays;
    g_cfg.drift_threshold = InpDriftThreshold;
    g_cfg.uso_max_weight = InpUSOMaxWeight;
