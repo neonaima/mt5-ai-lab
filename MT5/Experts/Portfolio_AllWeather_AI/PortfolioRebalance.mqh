@@ -13,7 +13,8 @@ struct PortfolioConfig
    int max_orders_per_cycle;
    double min_free_margin_pct;
    double max_spread_points;
-   double max_turnover_pct;
+   double max_turnover_pct_rebalance;
+   double max_turnover_pct_bootstrap;
    int rebalance_days;
    double drift_threshold;
    double uso_max_weight;
@@ -116,7 +117,7 @@ double PortfolioPositionValue(const string portfolio_id, long magic, string symb
    return SymbolValuePerLot(symbol, price) * volume;
 }
 
-bool GuardrailsOk(const PortfolioConfig &cfg, double free_margin_pct, double spread_points, double turnover_pct, int orders_count, string &reason)
+bool GuardrailsOk(const PortfolioConfig &cfg, double free_margin_pct, double spread_points, double turnover_pct, double max_turnover_pct, int orders_count, string &reason)
 {
    if(free_margin_pct < cfg.min_free_margin_pct)
    {
@@ -128,7 +129,7 @@ bool GuardrailsOk(const PortfolioConfig &cfg, double free_margin_pct, double spr
       reason = "Spread above max";
       return false;
    }
-   if(turnover_pct > cfg.max_turnover_pct)
+   if(turnover_pct > max_turnover_pct)
    {
       reason = "Turnover above max";
       return false;
@@ -141,7 +142,7 @@ bool GuardrailsOk(const PortfolioConfig &cfg, double free_margin_pct, double spr
    return true;
 }
 
-bool SymbolGuardrailsOk(const PortfolioConfig &cfg, string symbol, double turnover_pct, int orders_count, string &reason)
+bool SymbolGuardrailsOk(const PortfolioConfig &cfg, string symbol, double turnover_pct, double max_turnover_pct, int orders_count, string &reason)
 {
    double equity = AccountInfoDouble(ACCOUNT_EQUITY);
    if(equity <= 0.0)
@@ -177,7 +178,7 @@ bool SymbolGuardrailsOk(const PortfolioConfig &cfg, string symbol, double turnov
       LogMessage(StringFormat("Skip sym=%s reason=spread spreadPts=%g max=%g", symbol, spread_points, cfg.max_spread_points));
       return false;
    }
-   if(turnover_pct > cfg.max_turnover_pct)
+   if(turnover_pct > max_turnover_pct)
    {
       reason = "Turnover above max";
       return false;
@@ -281,19 +282,23 @@ bool ExecuteBootstrap(CTrade &trade_ref, PortfolioState &state, const PortfolioC
       turnover += MathAbs(delta_value);
    }
    double turnover_pct = turnover / equity;
+   LogMessage(StringFormat("Turnover guardrail: phase=BOOTSTRAP max=%g", cfg.max_turnover_pct_bootstrap));
    string reason = "";
-   if(!SymbolGuardrailsOk(cfg, state.targets[0].symbol, turnover_pct, 0, reason))
+   if(!SymbolGuardrailsOk(cfg, state.targets[0].symbol, turnover_pct, cfg.max_turnover_pct_bootstrap, 0, reason))
    {
       LogMessage("Bootstrap skipped: " + reason);
       return false;
    }
    bool completion_mode = (pos_count > 0 && neg_count > 0);
+   if(neg_count > 0 && pos_count == 0)
+      LogMessage("Bootstrap shrink-only mode: only negative deltas");
    if(neg_count > 0)
       SortDeltaIndices(neg_indices, neg_count, deltas, true);
    if(pos_count > 0)
       SortDeltaIndices(pos_indices, pos_count, deltas, false);
    int orders_done = 0;
-   if(completion_mode)
+   bool any_trade = false;
+   if(neg_count > 0)
    {
       for(int i=0; i<neg_count; i++)
       {
@@ -312,7 +317,7 @@ bool ExecuteBootstrap(CTrade &trade_ref, PortfolioState &state, const PortfolioC
          double volume_raw = MathAbs(delta_value) / value_per_lot;
          volume_raw = MathMin(volume_raw, current_volume);
          string guard_reason = "";
-         if(!SymbolGuardrailsOk(cfg, symbol, turnover_pct, orders_done, guard_reason))
+         if(!SymbolGuardrailsOk(cfg, symbol, turnover_pct, cfg.max_turnover_pct_bootstrap, orders_done, guard_reason))
          {
             if(guard_reason != "")
                LogMessage("Bootstrap guardrail: " + guard_reason);
@@ -341,6 +346,7 @@ bool ExecuteBootstrap(CTrade &trade_ref, PortfolioState &state, const PortfolioC
          {
             LogMessage(StringFormat("Trade: action=REDUCE sym=%s vol=%g reason=bootstrap_completion", symbol, volume));
             orders_done++;
+            any_trade = true;
             if(orders_done >= cfg.max_orders_per_cycle)
                break;
          }
@@ -361,7 +367,7 @@ bool ExecuteBootstrap(CTrade &trade_ref, PortfolioState &state, const PortfolioC
          continue;
       double volume_raw = MathAbs(delta_value) / value_per_lot;
       string guard_reason = "";
-      if(!SymbolGuardrailsOk(cfg, symbol, turnover_pct, orders_done, guard_reason))
+      if(!SymbolGuardrailsOk(cfg, symbol, turnover_pct, cfg.max_turnover_pct_bootstrap, orders_done, guard_reason))
       {
          if(guard_reason != "")
             LogMessage("Bootstrap guardrail: " + guard_reason);
@@ -390,10 +396,18 @@ bool ExecuteBootstrap(CTrade &trade_ref, PortfolioState &state, const PortfolioC
          LogMessage(StringFormat("Trade: action=BUY sym=%s vol=%g reason=bootstrap_completion", symbol, volume));
          LogMessage(StringFormat("BUY placed sym=%s volume=%g price=%g target_w=%g", symbol, volume, price, deltas[idx].target_weight));
          orders_done++;
+         any_trade = true;
       }
    }
-   state.last_bootstrap_ts = TimeCurrent();
-   LogMessage("Bootstrap end");
+   if(any_trade)
+   {
+      state.last_bootstrap_ts = TimeCurrent();
+      LogMessage("Bootstrap end");
+   }
+   else
+   {
+      LogMessage("Bootstrap no-op (no trades placed)");
+   }
    return true;
 }
 
@@ -429,8 +443,9 @@ bool ExecuteRebalance(CTrade &trade_ref, PortfolioState &state, const PortfolioC
       turnover += MathAbs(target_value - current_value);
    }
    double turnover_pct = turnover / equity;
+   LogMessage(StringFormat("Turnover guardrail: phase=REBALANCE max=%g", cfg.max_turnover_pct_rebalance));
    string reason = "";
-   if(!SymbolGuardrailsOk(cfg, state.targets[0].symbol, turnover_pct, 0, reason))
+   if(!SymbolGuardrailsOk(cfg, state.targets[0].symbol, turnover_pct, cfg.max_turnover_pct_rebalance, 0, reason))
    {
       LogMessage("Rebalance skipped: " + reason);
       return false;
@@ -474,6 +489,8 @@ bool ExecuteRebalance(CTrade &trade_ref, PortfolioState &state, const PortfolioC
       }
    }
    bool completion_mode = (pos_count > 0 && neg_count > 0);
+   if(neg_count > 0 && pos_count == 0)
+      LogMessage("Rebalance shrink-only mode: only negative deltas");
    if(neg_count > 0)
       SortDeltaIndices(neg_indices, neg_count, deltas, true);
    if(pos_count > 0)
@@ -499,7 +516,7 @@ bool ExecuteRebalance(CTrade &trade_ref, PortfolioState &state, const PortfolioC
          double volume_raw = MathAbs(delta_value) / value_per_lot;
          volume_raw = MathMin(volume_raw, current_volume);
          string guard_reason = "";
-         if(!SymbolGuardrailsOk(cfg, symbol, turnover_pct, orders_done, guard_reason))
+         if(!SymbolGuardrailsOk(cfg, symbol, turnover_pct, cfg.max_turnover_pct_rebalance, orders_done, guard_reason))
          {
             if(guard_reason != "")
                LogMessage("Rebalance guardrail: " + guard_reason);
@@ -549,7 +566,7 @@ bool ExecuteRebalance(CTrade &trade_ref, PortfolioState &state, const PortfolioC
          continue;
       double volume_raw = MathAbs(delta_value) / value_per_lot;
       string guard_reason = "";
-      if(!SymbolGuardrailsOk(cfg, symbol, turnover_pct, orders_done, guard_reason))
+      if(!SymbolGuardrailsOk(cfg, symbol, turnover_pct, cfg.max_turnover_pct_rebalance, orders_done, guard_reason))
       {
          if(guard_reason != "")
             LogMessage("Rebalance guardrail: " + guard_reason);
