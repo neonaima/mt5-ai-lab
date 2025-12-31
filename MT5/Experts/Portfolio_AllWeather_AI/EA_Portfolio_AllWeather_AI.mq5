@@ -83,7 +83,7 @@ bool KillSwitchActive(const PortfolioState &state, const PortfolioConfig &cfg)
    return state.last_dd_pct <= -cfg.max_dd;
 }
 
-static double PortfolioPositionVolumeByMagic(const string sym, long magic)
+double PortfolioPositionVolumeByMagic(const string sym, long magic)
 {
    double total_volume = 0.0;
    int total_positions = PositionsTotal();
