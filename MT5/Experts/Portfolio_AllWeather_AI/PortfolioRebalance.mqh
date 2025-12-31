@@ -20,7 +20,36 @@ struct PortfolioConfig
    double uso_drift_threshold;
    double uso_no_add_below_dd;
    double max_dd;
+   double capital_buffer_pct;
 };
+
+struct RebalanceDelta
+{
+   string symbol;
+   double target_weight;
+   double current_value;
+   double target_value;
+   double delta_value;
+};
+
+void SortDeltaIndices(int &indices[], int count, RebalanceDelta &deltas[], bool ascending)
+{
+   for(int i=0; i<count - 1; i++)
+   {
+      for(int j=i+1; j<count; j++)
+      {
+         double left = deltas[indices[i]].delta_value;
+         double right = deltas[indices[j]].delta_value;
+         bool swap = ascending ? (right < left) : (right > left);
+         if(swap)
+         {
+            int tmp = indices[i];
+            indices[i] = indices[j];
+            indices[j] = tmp;
+         }
+      }
+   }
+}
 
 int CountPortfolioPositions(const string portfolio_id, long magic)
 {
@@ -174,11 +203,14 @@ bool RebalanceDue(const PortfolioState &state, const PortfolioConfig &cfg)
    double equity = AccountInfoDouble(ACCOUNT_EQUITY);
    if(equity <= 0.0)
       return false;
+   double investable_capital = equity * (1.0 - cfg.capital_buffer_pct);
+   if(investable_capital <= 0.0)
+      return false;
    for(int i=0; i<total; i++)
    {
       string symbol = state.targets[i].symbol;
       double current_value = PortfolioPositionValue(cfg.portfolio_id, cfg.magic, symbol);
-      double current_weight = current_value / equity;
+      double current_weight = current_value / investable_capital;
       double target_weight = state.targets[i].weight;
       double drift = MathAbs(current_weight - target_weight);
       double threshold = cfg.drift_threshold;
@@ -199,37 +231,142 @@ bool ExecuteBootstrap(CTrade &trade_ref, PortfolioState &state, const PortfolioC
       LogMessage("Bootstrap skipped: equity <= 0");
       return false;
    }
-   int orders_done = 0;
+   double investable_capital = equity * (1.0 - cfg.capital_buffer_pct);
+   if(investable_capital <= 0.0)
+   {
+      LogMessage("Bootstrap skipped: investable capital <= 0");
+      return false;
+   }
+   double turnover = 0.0;
    int total = ArraySize(state.targets);
+   if(total == 0)
+   {
+      LogMessage("Bootstrap skipped: no targets");
+      return false;
+   }
+   RebalanceDelta deltas[];
+   ArrayResize(deltas, total);
+   int pos_count = 0;
+   int neg_count = 0;
+   int pos_indices[];
+   int neg_indices[];
    for(int i=0; i<total; i++)
    {
       string symbol = state.targets[i].symbol;
-      if(!EnsureSymbolReady(symbol))
-         continue;
       double target_weight = state.targets[i].weight;
       if(symbol == "USO.US")
          target_weight = MathMin(target_weight, cfg.uso_max_weight);
-      double target_value = equity * target_weight;
+      double target_value = investable_capital * target_weight;
       double current_value = PortfolioPositionValue(cfg.portfolio_id, cfg.magic, symbol);
       double delta_value = target_value - current_value;
+      deltas[i].symbol = symbol;
+      deltas[i].target_weight = target_weight;
+      deltas[i].current_value = current_value;
+      deltas[i].target_value = target_value;
+      deltas[i].delta_value = delta_value;
+      LogMessage(StringFormat("Target calc: sym=%s curVal=%g tgtVal=%g delta=%g",
+         symbol, current_value, target_value, delta_value));
+      if(delta_value > 0.0)
+      {
+         ArrayResize(pos_indices, pos_count + 1);
+         pos_indices[pos_count] = i;
+         pos_count++;
+      }
+      else if(delta_value < 0.0)
+      {
+         ArrayResize(neg_indices, neg_count + 1);
+         neg_indices[neg_count] = i;
+         neg_count++;
+      }
+      turnover += MathAbs(delta_value);
+   }
+   double turnover_pct = turnover / equity;
+   string reason = "";
+   if(!SymbolGuardrailsOk(cfg, state.targets[0].symbol, turnover_pct, 0, reason))
+   {
+      LogMessage("Bootstrap skipped: " + reason);
+      return false;
+   }
+   bool completion_mode = (pos_count > 0 && neg_count > 0);
+   if(neg_count > 0)
+      SortDeltaIndices(neg_indices, neg_count, deltas, true);
+   if(pos_count > 0)
+      SortDeltaIndices(pos_indices, pos_count, deltas, false);
+   int orders_done = 0;
+   if(completion_mode)
+   {
+      for(int i=0; i<neg_count; i++)
+      {
+         int idx = neg_indices[i];
+         string symbol = deltas[idx].symbol;
+         if(!EnsureSymbolReady(symbol))
+            continue;
+         double delta_value = deltas[idx].delta_value;
+         double current_volume = PortfolioPositionVolume(cfg.portfolio_id, cfg.magic, symbol);
+         if(current_volume <= 0.0)
+            continue;
+         double bid = SymbolInfoDouble(symbol, SYMBOL_BID);
+         double value_per_lot = SymbolValuePerLot(symbol, bid);
+         if(value_per_lot <= 0.0)
+            continue;
+         double volume_raw = MathAbs(delta_value) / value_per_lot;
+         volume_raw = MathMin(volume_raw, current_volume);
+         string guard_reason = "";
+         if(!SymbolGuardrailsOk(cfg, symbol, turnover_pct, orders_done, guard_reason))
+         {
+            if(guard_reason != "")
+               LogMessage("Bootstrap guardrail: " + guard_reason);
+            continue;
+         }
+         double min_lot = SymbolInfoDouble(symbol, SYMBOL_VOLUME_MIN);
+         if(min_lot > 0.0 && volume_raw < min_lot)
+         {
+            LogMessage(StringFormat("Skip sym=%s reason=below_min_lot volume_raw=%g min_lot=%g", symbol, volume_raw, min_lot));
+            continue;
+         }
+         double volume = NormalizeVolume(symbol, volume_raw);
+         if(volume <= 0.0)
+            continue;
+         if(!TerminalInfoInteger(TERMINAL_TRADE_ALLOWED) || !AccountInfoInteger(ACCOUNT_TRADE_ALLOWED)
+            || SymbolInfoInteger(symbol, SYMBOL_TRADE_MODE) == SYMBOL_TRADE_MODE_DISABLED)
+         {
+            LogMessage(StringFormat("Skip sym=%s reason=trade_disabled", symbol));
+            continue;
+         }
+         trade_ref.SetExpertMagicNumber(cfg.magic);
+         bool result = trade_ref.PositionClosePartial(symbol, volume);
+         if(!result)
+            result = trade_ref.PositionClose(symbol);
+         if(result)
+         {
+            LogMessage(StringFormat("Trade: action=REDUCE sym=%s vol=%g reason=bootstrap_completion", symbol, volume));
+            orders_done++;
+            if(orders_done >= cfg.max_orders_per_cycle)
+               break;
+         }
+      }
+   }
+   for(int i=0; i<pos_count; i++)
+   {
+      if(orders_done >= cfg.max_orders_per_cycle)
+         break;
+      int idx = pos_indices[i];
+      string symbol = deltas[idx].symbol;
+      if(!EnsureSymbolReady(symbol))
+         continue;
+      double delta_value = deltas[idx].delta_value;
       double price = SymbolInfoDouble(symbol, SYMBOL_ASK);
       double value_per_lot = SymbolValuePerLot(symbol, price);
-      double volume_raw = 0.0;
-      if(value_per_lot > 0.0)
-         volume_raw = MathAbs(delta_value) / value_per_lot;
-      LogMessage(StringFormat("Bootstrap check: sym=%s target_w=%g equity=%g target_val=%g price=%g volume_raw=%g",
-         symbol, target_weight, equity, target_value, price, volume_raw));
-      if(MathAbs(delta_value) <= 0.0)
+      if(value_per_lot <= 0.0)
          continue;
+      double volume_raw = MathAbs(delta_value) / value_per_lot;
       string guard_reason = "";
-      if(!SymbolGuardrailsOk(cfg, symbol, 0.0, orders_done, guard_reason))
+      if(!SymbolGuardrailsOk(cfg, symbol, turnover_pct, orders_done, guard_reason))
       {
          if(guard_reason != "")
             LogMessage("Bootstrap guardrail: " + guard_reason);
          continue;
       }
-      if(value_per_lot <= 0.0)
-         continue;
       double min_lot = SymbolInfoDouble(symbol, SYMBOL_VOLUME_MIN);
       if(min_lot > 0.0 && volume_raw < min_lot)
       {
@@ -247,19 +384,12 @@ bool ExecuteBootstrap(CTrade &trade_ref, PortfolioState &state, const PortfolioC
       }
       string comment = cfg.portfolio_id + "|" + symbol;
       trade_ref.SetExpertMagicNumber(cfg.magic);
-      bool result = false;
-      if(delta_value > 0)
-         result = trade_ref.Buy(volume, symbol, price, 0.0, 0.0, comment);
-      else
-         result = trade_ref.Sell(volume, symbol, SymbolInfoDouble(symbol, SYMBOL_BID), 0.0, 0.0, comment);
+      bool result = trade_ref.Buy(volume, symbol, price, 0.0, 0.0, comment);
       if(result)
       {
-         string side = (delta_value > 0.0 ? "BUY" : "SELL");
-         double fill_price = (delta_value > 0.0 ? price : SymbolInfoDouble(symbol, SYMBOL_BID));
-         LogMessage(StringFormat("%s placed sym=%s volume=%g price=%g target_w=%g", side, symbol, volume, fill_price, target_weight));
+         LogMessage(StringFormat("Trade: action=BUY sym=%s vol=%g reason=bootstrap_completion", symbol, volume));
+         LogMessage(StringFormat("BUY placed sym=%s volume=%g price=%g target_w=%g", symbol, volume, price, deltas[idx].target_weight));
          orders_done++;
-         if(orders_done >= cfg.max_orders_per_cycle)
-            break;
       }
    }
    state.last_bootstrap_ts = TimeCurrent();
@@ -275,6 +405,12 @@ bool ExecuteRebalance(CTrade &trade_ref, PortfolioState &state, const PortfolioC
       LogMessage("Rebalance skipped: equity <= 0");
       return false;
    }
+   double investable_capital = equity * (1.0 - cfg.capital_buffer_pct);
+   if(investable_capital <= 0.0)
+   {
+      LogMessage("Rebalance skipped: investable capital <= 0");
+      return false;
+   }
    double turnover = 0.0;
    int total = ArraySize(state.targets);
    if(total == 0)
@@ -288,7 +424,7 @@ bool ExecuteRebalance(CTrade &trade_ref, PortfolioState &state, const PortfolioC
       double target_weight = state.targets[i].weight;
       if(symbol == "USO.US")
          target_weight = MathMin(target_weight, cfg.uso_max_weight);
-      double target_value = equity * target_weight;
+      double target_value = investable_capital * target_weight;
       double current_value = PortfolioPositionValue(cfg.portfolio_id, cfg.magic, symbol);
       turnover += MathAbs(target_value - current_value);
    }
@@ -302,26 +438,116 @@ bool ExecuteRebalance(CTrade &trade_ref, PortfolioState &state, const PortfolioC
    WriteRebalanceProposal(state, "triggered");
    int orders_done = 0;
    bool any_trade = false;
+   RebalanceDelta deltas[];
+   ArrayResize(deltas, total);
+   int pos_count = 0;
+   int neg_count = 0;
+   int pos_indices[];
+   int neg_indices[];
    for(int i=0; i<total; i++)
    {
       string symbol = state.targets[i].symbol;
-      if(!EnsureSymbolReady(symbol))
-         continue;
       double target_weight = state.targets[i].weight;
       if(symbol == "USO.US")
          target_weight = MathMin(target_weight, cfg.uso_max_weight);
-      double target_value = equity * target_weight;
+      double target_value = investable_capital * target_weight;
       double current_value = PortfolioPositionValue(cfg.portfolio_id, cfg.magic, symbol);
       double delta_value = target_value - current_value;
+      deltas[i].symbol = symbol;
+      deltas[i].target_weight = target_weight;
+      deltas[i].current_value = current_value;
+      deltas[i].target_value = target_value;
+      deltas[i].delta_value = delta_value;
+      LogMessage(StringFormat("Target calc: sym=%s curVal=%g tgtVal=%g delta=%g",
+         symbol, current_value, target_value, delta_value));
+      if(delta_value > 0.0)
+      {
+         ArrayResize(pos_indices, pos_count + 1);
+         pos_indices[pos_count] = i;
+         pos_count++;
+      }
+      else if(delta_value < 0.0)
+      {
+         ArrayResize(neg_indices, neg_count + 1);
+         neg_indices[neg_count] = i;
+         neg_count++;
+      }
+   }
+   bool completion_mode = (pos_count > 0 && neg_count > 0);
+   if(neg_count > 0)
+      SortDeltaIndices(neg_indices, neg_count, deltas, true);
+   if(pos_count > 0)
+      SortDeltaIndices(pos_indices, pos_count, deltas, false);
+   if(neg_count > 0)
+   {
+      for(int i=0; i<neg_count; i++)
+      {
+         if(orders_done >= cfg.max_orders_per_cycle)
+            break;
+         int idx = neg_indices[i];
+         string symbol = deltas[idx].symbol;
+         if(!EnsureSymbolReady(symbol))
+            continue;
+         double delta_value = deltas[idx].delta_value;
+         double current_volume = PortfolioPositionVolume(cfg.portfolio_id, cfg.magic, symbol);
+         if(current_volume <= 0.0)
+            continue;
+         double bid = SymbolInfoDouble(symbol, SYMBOL_BID);
+         double value_per_lot = SymbolValuePerLot(symbol, bid);
+         if(value_per_lot <= 0.0)
+            continue;
+         double volume_raw = MathAbs(delta_value) / value_per_lot;
+         volume_raw = MathMin(volume_raw, current_volume);
+         string guard_reason = "";
+         if(!SymbolGuardrailsOk(cfg, symbol, turnover_pct, orders_done, guard_reason))
+         {
+            if(guard_reason != "")
+               LogMessage("Rebalance guardrail: " + guard_reason);
+            continue;
+         }
+         double min_lot = SymbolInfoDouble(symbol, SYMBOL_VOLUME_MIN);
+         if(min_lot > 0.0 && volume_raw < min_lot)
+         {
+            LogMessage(StringFormat("Skip sym=%s reason=below_min_lot volume_raw=%g min_lot=%g", symbol, volume_raw, min_lot));
+            continue;
+         }
+         double volume = NormalizeVolume(symbol, volume_raw);
+         if(volume <= 0.0)
+            continue;
+         if(!TerminalInfoInteger(TERMINAL_TRADE_ALLOWED) || !AccountInfoInteger(ACCOUNT_TRADE_ALLOWED)
+            || SymbolInfoInteger(symbol, SYMBOL_TRADE_MODE) == SYMBOL_TRADE_MODE_DISABLED)
+         {
+            LogMessage(StringFormat("Skip sym=%s reason=trade_disabled", symbol));
+            continue;
+         }
+         trade_ref.SetExpertMagicNumber(cfg.magic);
+         bool result = trade_ref.PositionClosePartial(symbol, volume);
+         if(!result)
+            result = trade_ref.PositionClose(symbol);
+         if(result)
+         {
+            if(completion_mode)
+               LogMessage(StringFormat("Trade: action=REDUCE sym=%s vol=%g reason=bootstrap_completion", symbol, volume));
+            LogMessage(StringFormat("SELL placed sym=%s volume=%g price=%g target_w=%g", symbol, volume, bid, deltas[idx].target_weight));
+            any_trade = true;
+            orders_done++;
+         }
+      }
+   }
+   for(int i=0; i<pos_count; i++)
+   {
+      if(orders_done >= cfg.max_orders_per_cycle)
+         break;
+      int idx = pos_indices[i];
+      string symbol = deltas[idx].symbol;
+      if(!EnsureSymbolReady(symbol))
+         continue;
+      double delta_value = deltas[idx].delta_value;
       double price = SymbolInfoDouble(symbol, SYMBOL_ASK);
       double value_per_lot = SymbolValuePerLot(symbol, price);
-      double volume_raw = 0.0;
-      if(value_per_lot > 0.0)
-         volume_raw = MathAbs(delta_value) / value_per_lot;
-      LogMessage(StringFormat("Rebalance check: sym=%s target_w=%g equity=%g target_val=%g price=%g volume_raw=%g",
-         symbol, target_weight, equity, target_value, price, volume_raw));
-      if(MathAbs(delta_value) <= 0.0)
+      if(value_per_lot <= 0.0)
          continue;
+      double volume_raw = MathAbs(delta_value) / value_per_lot;
       string guard_reason = "";
       if(!SymbolGuardrailsOk(cfg, symbol, turnover_pct, orders_done, guard_reason))
       {
@@ -334,8 +560,6 @@ bool ExecuteRebalance(CTrade &trade_ref, PortfolioState &state, const PortfolioC
          LogMessage("USO add skipped due to drawdown guard");
          continue;
       }
-      if(value_per_lot <= 0.0)
-         continue;
       double min_lot = SymbolInfoDouble(symbol, SYMBOL_VOLUME_MIN);
       if(min_lot > 0.0 && volume_raw < min_lot)
       {
@@ -353,20 +577,14 @@ bool ExecuteRebalance(CTrade &trade_ref, PortfolioState &state, const PortfolioC
       }
       string comment = cfg.portfolio_id + "|" + symbol;
       trade_ref.SetExpertMagicNumber(cfg.magic);
-      bool result = false;
-      if(delta_value > 0)
-         result = trade_ref.Buy(volume, symbol, price, 0.0, 0.0, comment);
-      else
-         result = trade_ref.Sell(volume, symbol, SymbolInfoDouble(symbol, SYMBOL_BID), 0.0, 0.0, comment);
+      bool result = trade_ref.Buy(volume, symbol, price, 0.0, 0.0, comment);
       if(result)
       {
-         string side = (delta_value > 0.0 ? "BUY" : "SELL");
-         double fill_price = (delta_value > 0.0 ? price : SymbolInfoDouble(symbol, SYMBOL_BID));
-         LogMessage(StringFormat("%s placed sym=%s volume=%g price=%g target_w=%g", side, symbol, volume, fill_price, target_weight));
+         if(completion_mode)
+            LogMessage(StringFormat("Trade: action=BUY sym=%s vol=%g reason=bootstrap_completion", symbol, volume));
+         LogMessage(StringFormat("BUY placed sym=%s volume=%g price=%g target_w=%g", symbol, volume, price, deltas[idx].target_weight));
          any_trade = true;
          orders_done++;
-         if(orders_done >= cfg.max_orders_per_cycle)
-            break;
       }
    }
    if(any_trade)
