@@ -367,7 +367,8 @@ bool ExecuteBootstrap(CTrade &trade_ref, PortfolioState &state, const PortfolioC
       if(!EnsureSymbolReady(symbol))
          continue;
       double delta_value = deltas[idx].delta_value;
-      if(MathAbs(delta_value) < cfg.min_trade_value)
+      bool is_missing = (deltas[idx].current_value <= 0.0);
+      if(!is_missing && MathAbs(delta_value) < cfg.min_trade_value)
       {
          LogMessage(StringFormat("Skip sym=%s reason=delta_below_min_value delta=%g min=%g", symbol, delta_value, cfg.min_trade_value));
          continue;
@@ -576,7 +577,8 @@ bool ExecuteRebalance(CTrade &trade_ref, PortfolioState &state, const PortfolioC
       if(!EnsureSymbolReady(symbol))
          continue;
       double delta_value = deltas[idx].delta_value;
-      if(MathAbs(delta_value) < cfg.min_trade_value)
+      bool is_missing = (deltas[idx].current_value <= 0.0);
+      if(!is_missing && MathAbs(delta_value) < cfg.min_trade_value)
       {
          LogMessage(StringFormat("Skip sym=%s reason=delta_below_min_value delta=%g min=%g", symbol, delta_value, cfg.min_trade_value));
          continue;
