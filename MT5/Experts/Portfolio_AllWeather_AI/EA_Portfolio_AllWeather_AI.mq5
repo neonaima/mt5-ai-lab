@@ -100,8 +100,27 @@ void EvaluateCycle(string reason)
    string server = AccountInfoString(ACCOUNT_SERVER);
    bool account_mismatch = (g_state.account_login != login) || (g_state.account_server != server);
 
-   int positions = CountPortfolioPositions(g_cfg.portfolio_id, g_cfg.magic);
-   bool need_bootstrap = (positions == 0) || account_mismatch;
+   bool portfolio_incomplete = false;
+   int open_positions = 0;
+   int missing_positions = 0;
+   int total_targets = ArraySize(g_state.targets);
+   for(int i=0; i<total_targets; i++)
+   {
+      string symbol = g_state.targets[i].symbol;
+      if(!PositionSelect(symbol) || PositionGetDouble(POSITION_VOLUME) <= 0.0)
+      {
+         portfolio_incomplete = true;
+         missing_positions++;
+      }
+      else
+      {
+         open_positions++;
+      }
+   }
+   LogMessage(StringFormat("Phase select: incomplete=%d open_positions=%d missing=%d",
+      portfolio_incomplete ? 1 : 0, open_positions, missing_positions));
+
+   bool need_bootstrap = portfolio_incomplete || account_mismatch;
 
    if(need_bootstrap)
    {

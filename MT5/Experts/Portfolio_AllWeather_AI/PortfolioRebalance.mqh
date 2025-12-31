@@ -282,7 +282,7 @@ bool ExecuteBootstrap(CTrade &trade_ref, PortfolioState &state, const PortfolioC
       turnover += MathAbs(delta_value);
    }
    double turnover_pct = turnover / equity;
-   LogMessage(StringFormat("Turnover guardrail: phase=BOOTSTRAP max=%g", cfg.max_turnover_pct_bootstrap));
+   LogMessage(StringFormat("Turnover guardrail: phase=BOOTSTRAP_COMPLETION max=%g", cfg.max_turnover_pct_bootstrap));
    string reason = "";
    if(!SymbolGuardrailsOk(cfg, state.targets[0].symbol, turnover_pct, cfg.max_turnover_pct_bootstrap, 0, reason))
    {
