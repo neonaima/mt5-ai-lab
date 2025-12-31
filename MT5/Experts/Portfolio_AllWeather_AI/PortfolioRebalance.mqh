@@ -22,6 +22,7 @@ struct PortfolioConfig
    double uso_no_add_below_dd;
    double max_dd;
    double capital_buffer_pct;
+   double min_trade_value;
 };
 
 struct RebalanceDelta
@@ -307,6 +308,11 @@ bool ExecuteBootstrap(CTrade &trade_ref, PortfolioState &state, const PortfolioC
          if(!EnsureSymbolReady(symbol))
             continue;
          double delta_value = deltas[idx].delta_value;
+         if(MathAbs(delta_value) < cfg.min_trade_value)
+         {
+            LogMessage(StringFormat("Skip sym=%s reason=delta_below_min_value delta=%g min=%g", symbol, delta_value, cfg.min_trade_value));
+            continue;
+         }
          double current_volume = PortfolioPositionVolume(cfg.portfolio_id, cfg.magic, symbol);
          if(current_volume <= 0.0)
             continue;
@@ -361,6 +367,11 @@ bool ExecuteBootstrap(CTrade &trade_ref, PortfolioState &state, const PortfolioC
       if(!EnsureSymbolReady(symbol))
          continue;
       double delta_value = deltas[idx].delta_value;
+      if(MathAbs(delta_value) < cfg.min_trade_value)
+      {
+         LogMessage(StringFormat("Skip sym=%s reason=delta_below_min_value delta=%g min=%g", symbol, delta_value, cfg.min_trade_value));
+         continue;
+      }
       double price = SymbolInfoDouble(symbol, SYMBOL_ASK);
       double value_per_lot = SymbolValuePerLot(symbol, price);
       if(value_per_lot <= 0.0)
@@ -506,6 +517,11 @@ bool ExecuteRebalance(CTrade &trade_ref, PortfolioState &state, const PortfolioC
          if(!EnsureSymbolReady(symbol))
             continue;
          double delta_value = deltas[idx].delta_value;
+         if(MathAbs(delta_value) < cfg.min_trade_value)
+         {
+            LogMessage(StringFormat("Skip sym=%s reason=delta_below_min_value delta=%g min=%g", symbol, delta_value, cfg.min_trade_value));
+            continue;
+         }
          double current_volume = PortfolioPositionVolume(cfg.portfolio_id, cfg.magic, symbol);
          if(current_volume <= 0.0)
             continue;
@@ -560,6 +576,11 @@ bool ExecuteRebalance(CTrade &trade_ref, PortfolioState &state, const PortfolioC
       if(!EnsureSymbolReady(symbol))
          continue;
       double delta_value = deltas[idx].delta_value;
+      if(MathAbs(delta_value) < cfg.min_trade_value)
+      {
+         LogMessage(StringFormat("Skip sym=%s reason=delta_below_min_value delta=%g min=%g", symbol, delta_value, cfg.min_trade_value));
+         continue;
+      }
       double price = SymbolInfoDouble(symbol, SYMBOL_ASK);
       double value_per_lot = SymbolValuePerLot(symbol, price);
       if(value_per_lot <= 0.0)

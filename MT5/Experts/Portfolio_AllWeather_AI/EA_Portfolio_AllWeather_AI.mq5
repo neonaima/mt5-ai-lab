@@ -29,6 +29,7 @@ input double InpMaxSpreadPoints = 25.0;
 input double InpMaxTurnoverPct_Rebalance = 0.15;
 input double InpMaxTurnoverPct_Bootstrap = 0.80;
 input int InpMaxOrdersPerCycle = 6;
+input double InpMinTradeValue = 50.0; // valuta del conto, default 50
 
 CTrade trade;
 PortfolioState g_state;
@@ -65,6 +66,7 @@ void UpdateConfig()
    g_cfg.uso_no_add_below_dd = InpUSONoAddBelowDD;
    g_cfg.max_dd = InpMaxDD;
    g_cfg.capital_buffer_pct = InpCapitalBufferPct;
+   g_cfg.min_trade_value = InpMinTradeValue;
 }
 
 void UpdateDrawdown(PortfolioState &state)
