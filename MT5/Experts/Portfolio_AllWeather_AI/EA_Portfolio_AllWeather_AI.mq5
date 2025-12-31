@@ -83,6 +83,24 @@ bool KillSwitchActive(const PortfolioState &state, const PortfolioConfig &cfg)
    return state.last_dd_pct <= -cfg.max_dd;
 }
 
+static double PortfolioPositionVolumeByMagic(const string sym, long magic)
+{
+   double total_volume = 0.0;
+   int total_positions = PositionsTotal();
+   for(int i = 0; i < total_positions; i++)
+   {
+      ulong ticket = PositionGetTicket(i);
+      if(!PositionSelectByTicket(ticket))
+         continue;
+      if(PositionGetString(POSITION_SYMBOL) != sym)
+         continue;
+      if(PositionGetInteger(POSITION_MAGIC) != magic)
+         continue;
+      total_volume += PositionGetDouble(POSITION_VOLUME);
+   }
+   return total_volume;
+}
+
 void EvaluateCycle(string reason)
 {
    UpdateConfig();
@@ -107,7 +125,8 @@ void EvaluateCycle(string reason)
    for(int i=0; i<total_targets; i++)
    {
       string symbol = g_state.targets[i].symbol;
-      if(!PositionSelect(symbol) || PositionGetDouble(POSITION_VOLUME) <= 0.0)
+      double vol = PortfolioPositionVolumeByMagic(symbol, g_cfg.magic);
+      if(vol <= 0.0)
       {
          portfolio_incomplete = true;
          missing_positions++;
